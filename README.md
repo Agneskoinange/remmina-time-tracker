@@ -7,7 +7,7 @@ A lightweight session tracking plugin for [Remmina](https://remmina.org) that lo
 ## Features
 
 - **CSV Session Logging** — Logs `start` and `end` events with timestamps, server name, and Remmina folder/group name
-- **System-Wide Idle Detection** — Monitors mouse/keyboard activity across the entire machine (not just the Remmina window)
+- **Smart Idle Detection** — Tracks Remmina window focus; if you switch away from Remmina (e.g., to do emails), the idle timer starts for your RDP sessions
 - **Auto-Disconnect** — Kills RDP/SSH sessions after 10 minutes of inactivity (configurable)
 - **Sleep/Wake Handling** — Detects system sleep via systemd-logind D-Bus; disconnects if idle threshold was crossed during sleep
 - **Multi-Connection Support** — Tracks multiple simultaneous RDP/SSH sessions independently
@@ -20,13 +20,14 @@ The tracker runs as a background daemon that:
 
 1. **Scans for `xfreerdp`/`ssh` processes** spawned by Remmina every 5 seconds
 2. **Reads `.remmina` profile files** to map server addresses to folder/group names
-3. **Checks system idle time** every 30 seconds using `xprintidle` (X11) or GNOME Mutter D-Bus (Wayland)
-4. **Auto-disconnects** by sending SIGTERM to the process if idle exceeds the threshold
-5. **Listens for sleep/wake** via `org.freedesktop.login1.Manager.PrepareForSleep` D-Bus signal
+3. **Tracks Remmina window focus** — If Remmina loses focus (you switch to email, browser, etc.), starts counting "unfocused time" as idle for your RDP sessions
+4. **Checks system idle time** when Remmina is focused, using `xprintidle` (X11) or GNOME Mutter D-Bus (Wayland)
+5. **Auto-disconnects** by sending SIGTERM to the process if idle exceeds the threshold
+6. **Listens for sleep/wake** via `org.freedesktop.login1.Manager.PrepareForSleep` D-Bus signal
 
 ## CSV Output Format
 
-Logs are written to `~/.local/share/remmina/time_tracking.csv`:
+Logs are written to `~/Documents/remmina_time_tracking.csv`:
 
 ```csv
 timestamp,event,server,folder
@@ -51,7 +52,7 @@ The installer will:
 - Check and install required dependencies (`psutil`, `PyGObject`, `xprintidle`)
 - Install the tracker to `~/.local/lib/remmina-time-tracker/`
 - Create a launcher at `~/.local/bin/remmina-time-tracker`
-- Set up a systemd user service that auto-starts on login
+- **Set up a systemd user service that auto-starts on every login** — the tracker will run automatically in the background whenever you log in to your desktop
 
 ### Manual Install
 
@@ -79,6 +80,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now remmina-time-tracker.service
 ```
 
+> **Note:** The tracker is configured to start automatically on login via systemd. You don't need to manually start it after installation — just log out and log back in, or run `systemctl --user start remmina-time-tracker` to start it immediately.
+
 ## Usage
 
 ### Service Management
@@ -97,7 +100,7 @@ systemctl --user status remmina-time-tracker
 journalctl --user -u remmina-time-tracker -f
 
 # View the CSV log
-cat ~/.local/share/remmina/time_tracking.csv
+cat ~/Documents/remmina_time_tracking.csv
 ```
 
 ### Command-Line Options
@@ -126,6 +129,7 @@ remmina-time-tracker --log-file ~/.local/share/remmina/tracker.log
 | `python3-psutil` | Process monitoring | `sudo apt install python3-psutil` |
 | `python3-gi` | D-Bus/GLib integration | `sudo apt install python3-gi` |
 | `xprintidle` | System-wide idle time (X11) | `sudo apt install xprintidle` |
+| `xdotool` | Window focus detection (X11) | `sudo apt install xdotool` |
 
 ### Wayland Support
 
@@ -172,7 +176,7 @@ chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
-This removes the service, launcher, and installed files. The CSV log at `~/.local/share/remmina/time_tracking.csv` is preserved.
+This removes the service, launcher, and installed files. The CSV log at `~/Documents/remmina_time_tracking.csv` is preserved.
 
 ## Architecture
 
@@ -182,8 +186,9 @@ remmina_time_tracker/
 ├── daemon.py            # Main daemon: GLib event loop, orchestration
 ├── monitor.py           # Process scanning: detects xfreerdp/ssh processes
 ├── config_parser.py     # Parses ~/.local/share/remmina/*.remmina files
-├── csv_logger.py        # Thread-safe CSV writer
+├── csv_logger.py        # Thread-safe CSV writer with error handling
 ├── idle_detector.py     # System-wide idle detection (X11/Wayland)
+├── window_tracker.py    # Remmina window focus detection (X11/Wayland)
 └── sleep_handler.py     # Sleep/wake D-Bus signal handler
 ```
 

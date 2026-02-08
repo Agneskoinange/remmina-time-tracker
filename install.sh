@@ -57,6 +57,14 @@ install_apt_packages() {
         echo "[OK] xprintidle"
     fi
 
+    # Check xdotool
+    if ! command -v xdotool &>/dev/null; then
+        echo "[!] xdotool not found (needed for window focus detection on X11)"
+        packages+=("xdotool")
+    else
+        echo "[OK] xdotool"
+    fi
+
     if [ ${#packages[@]} -gt 0 ]; then
         echo ""
         echo "Installing missing packages: ${packages[*]}"
@@ -139,7 +147,7 @@ echo ""
 echo "Start now:     systemctl --user start remmina-time-tracker"
 echo "Check status:  systemctl --user status remmina-time-tracker"
 echo "View logs:     journalctl --user -u remmina-time-tracker -f"
-echo "View CSV:      cat ~/.local/share/remmina/time_tracking.csv"
+echo "View CSV:      cat ~/Documents/remmina_time_tracking.csv"
 echo ""
 echo "The service will auto-start on login."
 echo ""
