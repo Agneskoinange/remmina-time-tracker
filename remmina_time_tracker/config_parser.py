@@ -76,11 +76,11 @@ def find_profile_by_server(server_addr, profiles=None):
     # Localhost aliases
     LOCALHOST_ALIASES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
-    # Normalize: strip default RDP port and resolve localhost variants
+    # Normalize: strip default ports and resolve localhost variants
     def normalize(addr):
         addr = addr.strip()
-        if addr.endswith(":3389"):
-            addr = addr[:-5]
+        if addr.endswith(":3389") or addr.endswith(":22"):
+            addr = addr.rsplit(":", 1)[0]
         if addr in LOCALHOST_ALIASES:
             addr = "localhost"
         return addr
