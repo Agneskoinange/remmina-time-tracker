@@ -38,23 +38,36 @@ class WindowTracker:
             return True  # Assume focused to avoid false positives
 
     def _is_focused_x11(self):
-        """Check focus on X11 using xdotool or xprop."""
+        """Check focus on X11 using WM_CLASS (not window title).
+
+        Window titles can contain project folder names (e.g. VS Code shows
+        "Remmina-Plugin" in its title), causing false positives. WM_CLASS
+        is set by the application itself and is reliable.
+        """
+        # Method 1: xdotool to get window ID, then xprop for WM_CLASS
         try:
-            # Try xdotool first (more reliable)
             result = subprocess.run(
-                ["/usr/bin/xdotool", "getactivewindow", "getwindowname"],
+                ["/usr/bin/xdotool", "getactivewindow"],
                 capture_output=True,
                 text=True,
                 timeout=1
             )
             if result.returncode == 0:
-                window_name = result.stdout.strip().lower()
-                return "remmina" in window_name
+                window_id = result.stdout.strip()
+                class_result = subprocess.run(
+                    ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1
+                )
+                if class_result.returncode == 0:
+                    wm_class = class_result.stdout.lower()
+                    return "remmina" in wm_class
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
+        # Method 2: xprop only (fallback if xdotool is missing)
         try:
-            # Fallback to xprop
             result = subprocess.run(
                 ["/usr/bin/xprop", "-root", "_NET_ACTIVE_WINDOW"],
                 capture_output=True,
@@ -63,14 +76,14 @@ class WindowTracker:
             )
             if result.returncode == 0 and "0x" in result.stdout:
                 window_id = result.stdout.split()[-1]
-                name_result = subprocess.run(
+                class_result = subprocess.run(
                     ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
                     capture_output=True,
                     text=True,
                     timeout=1
                 )
-                if name_result.returncode == 0:
-                    wm_class = name_result.stdout.lower()
+                if class_result.returncode == 0:
+                    wm_class = class_result.stdout.lower()
                     return "remmina" in wm_class
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
