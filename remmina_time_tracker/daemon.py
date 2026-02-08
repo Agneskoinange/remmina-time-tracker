@@ -17,7 +17,7 @@ logger = logging.getLogger("remmina_time_tracker")
 SCAN_INTERVAL_MS = 5000       # Process scan interval: 5 seconds
 IDLE_CHECK_INTERVAL_MS = 30000  # Idle check interval: 30 seconds
 IDLE_THRESHOLD_MS = 600000    # 10 minutes in milliseconds
-CSV_PATH = os.path.expanduser("~/.local/share/remmina/time_tracking.csv")
+CSV_PATH = os.path.expanduser("~/Documents/remmina_time_tracking.csv")
 
 # Import local modules
 from remmina_time_tracker.csv_logger import CSVLogger
@@ -25,6 +25,7 @@ from remmina_time_tracker.config_parser import parse_remmina_files, find_profile
 from remmina_time_tracker.monitor import scan_active_connections, kill_session, ActiveSession
 from remmina_time_tracker.idle_detector import IdleDetector
 from remmina_time_tracker.sleep_handler import SleepHandler
+from remmina_time_tracker.window_tracker import WindowTracker
 
 
 class TimeTrackerDaemon:
@@ -33,6 +34,7 @@ class TimeTrackerDaemon:
     def __init__(self, csv_path=None, idle_threshold_ms=None, enable_idle=True):
         self.csv_logger = CSVLogger(csv_path or CSV_PATH)
         self.idle_detector = IdleDetector() if enable_idle else None
+        self.window_tracker = WindowTracker() if enable_idle else None
         self.idle_threshold_ms = idle_threshold_ms or IDLE_THRESHOLD_MS
         self.enable_idle = enable_idle
 
@@ -47,6 +49,9 @@ class TimeTrackerDaemon:
         self._sleep_timestamp: Optional[datetime] = None
         self._pre_sleep_idle_ms: int = 0
         self._is_sleeping = False
+
+        # Track when Remmina lost focus (for session-specific idle tracking)
+        self._remmina_unfocused_since: Optional[datetime] = None
 
         # GLib main loop
         self._loop = None
@@ -150,28 +155,61 @@ class TimeTrackerDaemon:
         return True  # Keep the timeout active
 
     def _idle_tick(self):
-        """Periodic idle check - auto-disconnect if idle too long."""
+        """Periodic idle check - auto-disconnect if idle too long.
+
+        Checks both system idle time AND Remmina window focus.
+        If Remmina is not focused, count that as "session idle" time.
+        """
         if self._is_sleeping:
             return True
         if not self.idle_detector or not self.idle_detector.is_available():
             return True
         if not self._active_sessions:
+            self._remmina_unfocused_since = None  # Reset if no sessions
             return True
 
         try:
-            idle_ms = self.idle_detector.get_idle_ms()
-            logger.debug("System idle: %.1f seconds", idle_ms / 1000)
+            now = datetime.now()
+
+            # Check if Remmina window is focused
+            remmina_focused = True
+            if self.window_tracker:
+                remmina_focused = self.window_tracker.is_remmina_focused()
+
+            # Track when Remmina loses/regains focus
+            if not remmina_focused:
+                if self._remmina_unfocused_since is None:
+                    self._remmina_unfocused_since = now
+                    logger.debug("Remmina lost focus, starting unfocused timer")
+            else:
+                if self._remmina_unfocused_since is not None:
+                    logger.debug("Remmina regained focus, resetting unfocused timer")
+                self._remmina_unfocused_since = None
+
+            # Determine effective idle time
+            idle_ms = 0
+            disconnect_reason = ""
+
+            if not remmina_focused and self._remmina_unfocused_since:
+                # Remmina is not focused - count unfocused duration as idle time
+                unfocused_duration = now - self._remmina_unfocused_since
+                idle_ms = unfocused_duration.total_seconds() * 1000
+                disconnect_reason = f"Remmina unfocused for {idle_ms / 60000:.1f} min"
+                logger.debug("Remmina unfocused idle: %.1f seconds", idle_ms / 1000)
+            else:
+                # Remmina is focused - use system-wide idle time
+                idle_ms = self.idle_detector.get_idle_ms()
+                disconnect_reason = f"System idle for {idle_ms / 60000:.1f} min"
+                logger.debug("System idle (Remmina focused): %.1f seconds", idle_ms / 1000)
 
             if idle_ms >= self.idle_threshold_ms:
-                now = datetime.now()
-                # The "end" timestamp is when idle threshold was first crossed:
-                # last_activity + threshold
+                # Calculate when idle threshold was first crossed
                 last_activity = now - timedelta(milliseconds=idle_ms)
                 end_time = last_activity + timedelta(milliseconds=self.idle_threshold_ms)
 
                 logger.info(
-                    "Idle threshold reached (%.1f min). Auto-disconnecting all sessions.",
-                    idle_ms / 60000,
+                    "Idle threshold reached: %s. Auto-disconnecting all sessions.",
+                    disconnect_reason,
                 )
 
                 # Disconnect all active sessions
@@ -188,6 +226,9 @@ class TimeTrackerDaemon:
                         end_time.strftime("%H:%M:%S"),
                     )
                     del self._active_sessions[pid]
+
+                # Reset unfocused timer
+                self._remmina_unfocused_since = None
 
         except Exception as e:
             logger.error("Idle check error: %s", e)
