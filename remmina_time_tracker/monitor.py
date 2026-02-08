@@ -197,24 +197,27 @@ def scan_active_connections():
     return connections
 
 
-def kill_session(session_key, sessions_info=None, signal_num=15):
+def kill_session(session_key, active_sessions=None, signal_num=15):
     """Terminate a session.
 
-    For network-detected sessions (Remmina internal), we close Remmina.
-    For standalone processes, we send SIGTERM to the process.
+    For standalone processes (xfreerdp/ssh), sends SIGTERM directly.
+    For Remmina internal sessions, only kills Remmina if this is the
+    ONLY active session using that Remmina PID — otherwise, killing
+    Remmina would disconnect all open connections.
 
     Args:
         session_key: The session key string ("pid:server").
-        sessions_info: Optional dict with session info (for remmina_pid).
+        active_sessions: Dict of all currently active sessions (to check
+            if other sessions share the same Remmina PID).
         signal_num: Signal number (default: 15 = SIGTERM).
 
     Returns:
-        True if signal was sent successfully.
+        True if signal was sent successfully, False otherwise.
     """
     if psutil is None:
         return False
 
-    # Try to extract PID from session key
+    # Extract PID from session key
     try:
         pid_str = session_key.split(":")[0]
         pid = int(pid_str)
@@ -224,8 +227,29 @@ def kill_session(session_key, sessions_info=None, signal_num=15):
 
     try:
         proc = psutil.Process(pid)
+        proc_name = proc.name().lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+        logger.warning("Cannot find PID %d: %s", pid, e)
+        return False
+
+    # If this is Remmina (not standalone xfreerdp/ssh), check for other sessions
+    if "remmina" in proc_name and active_sessions:
+        same_pid_sessions = [
+            k for k in active_sessions
+            if k != session_key and k.startswith(f"{pid}:")
+        ]
+        if same_pid_sessions:
+            logger.warning(
+                "Cannot kill Remmina PID %d for session %s — "
+                "%d other session(s) still active on the same process. "
+                "Logging end event only.",
+                pid, session_key, len(same_pid_sessions),
+            )
+            return False
+
+    try:
         proc.send_signal(signal_num)
-        logger.info("Sent signal %d to PID %d (%s)", signal_num, pid, proc.name())
+        logger.info("Sent signal %d to PID %d (%s)", signal_num, pid, proc_name)
         return True
     except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
         logger.warning("Failed to kill PID %d: %s", pid, e)

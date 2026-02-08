@@ -95,13 +95,13 @@ export PYTHONPATH="$INSTALL_DIR:$PYTHONPATH"
 
 # Auto-detect DISPLAY if not set (systemd services may not inherit it)
 if [ -z "$DISPLAY" ]; then
-    # Try to get DISPLAY from the user's graphical session
-    DETECTED=$(strings /proc/$(pgrep -u "$USER" -f "gnome-session|xfce4-session|cinnamon-session|mate-session" -o 2>/dev/null | head -1)/environ 2>/dev/null | grep '^DISPLAY=' | cut -d= -f2)
-    if [ -n "$DETECTED" ]; then
-        export DISPLAY="$DETECTED"
-    else
-        export DISPLAY=":0"
+    # Method 1: Try systemd user environment (most reliable)
+    DETECTED=$(systemctl --user show-environment 2>/dev/null | grep '^DISPLAY=' | cut -d= -f2)
+    # Method 2: Try reading from a running desktop session process
+    if [ -z "$DETECTED" ]; then
+        DETECTED=$(strings /proc/$(pgrep -u "$USER" -f "gnome-session|xfce4-session|cinnamon-session|mate-session|cosmic-session" -o 2>/dev/null | head -1)/environ 2>/dev/null | grep '^DISPLAY=' | cut -d= -f2)
     fi
+    export DISPLAY="${DETECTED:-:0}"
 fi
 
 exec python3 -m remmina_time_tracker.daemon "$@"

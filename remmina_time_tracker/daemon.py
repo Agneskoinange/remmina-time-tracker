@@ -214,18 +214,18 @@ class TimeTrackerDaemon:
 
                 # Disconnect all active sessions
                 pids_to_disconnect = list(self._active_sessions.keys())
-                for pid in pids_to_disconnect:
-                    session = self._active_sessions[pid]
+                for session_key in pids_to_disconnect:
+                    session = self._active_sessions[session_key]
                     self.csv_logger.log_event(
                         "end", session.server, session.folder, timestamp=end_time
                     )
-                    kill_session(pid)
+                    kill_session(session_key, self._active_sessions)
                     logger.info(
                         "Auto-disconnected: %s (%s) at %s",
                         session.server, session.folder,
                         end_time.strftime("%H:%M:%S"),
                     )
-                    del self._active_sessions[pid]
+                    del self._active_sessions[session_key]
 
                 # Reset unfocused timer
                 self._remmina_unfocused_since = None
@@ -343,17 +343,17 @@ class TimeTrackerDaemon:
     def _disconnect_all_sessions(self, end_time):
         """Disconnect all active sessions and log end time."""
         pids_to_disconnect = list(self._active_sessions.keys())
-        for pid in pids_to_disconnect:
-            session = self._active_sessions[pid]
+        for session_key in pids_to_disconnect:
+            session = self._active_sessions[session_key]
             self.csv_logger.log_event(
                 "end", session.server, session.folder, timestamp=end_time
             )
-            kill_session(pid)
+            kill_session(session_key, self._active_sessions)
             logger.info(
                 "Auto-disconnected (sleep): %s (%s)",
                 session.server, session.folder,
             )
-            del self._active_sessions[pid]
+            del self._active_sessions[session_key]
 
     def _cleanup_on_exit(self):
         """Log end for any remaining active sessions on daemon shutdown."""
