@@ -93,7 +93,17 @@ cat > "$BIN_DIR/remmina-time-tracker" << 'LAUNCHER'
 INSTALL_DIR="$HOME/.local/lib/remmina-time-tracker"
 export PYTHONPATH="$INSTALL_DIR:$PYTHONPATH"
 
-# Pass through XDG_SESSION_TYPE for idle detection
+# Auto-detect DISPLAY if not set (systemd services may not inherit it)
+if [ -z "$DISPLAY" ]; then
+    # Try to get DISPLAY from the user's graphical session
+    DETECTED=$(strings /proc/$(pgrep -u "$USER" -f "gnome-session|xfce4-session|cinnamon-session|mate-session" -o 2>/dev/null | head -1)/environ 2>/dev/null | grep '^DISPLAY=' | cut -d= -f2)
+    if [ -n "$DETECTED" ]; then
+        export DISPLAY="$DETECTED"
+    else
+        export DISPLAY=":0"
+    fi
+fi
+
 exec python3 -m remmina_time_tracker.daemon "$@"
 LAUNCHER
 chmod +x "$BIN_DIR/remmina-time-tracker"

@@ -42,7 +42,7 @@ class WindowTracker:
         try:
             # Try xdotool first (more reliable)
             result = subprocess.run(
-                ["xdotool", "getactivewindow", "getwindowname"],
+                ["/usr/bin/xdotool", "getactivewindow", "getwindowname"],
                 capture_output=True,
                 text=True,
                 timeout=1
@@ -56,7 +56,7 @@ class WindowTracker:
         try:
             # Fallback to xprop
             result = subprocess.run(
-                ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+                ["/usr/bin/xprop", "-root", "_NET_ACTIVE_WINDOW"],
                 capture_output=True,
                 text=True,
                 timeout=1
@@ -64,7 +64,7 @@ class WindowTracker:
             if result.returncode == 0 and "0x" in result.stdout:
                 window_id = result.stdout.split()[-1]
                 name_result = subprocess.run(
-                    ["xprop", "-id", window_id, "WM_CLASS"],
+                    ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
                     capture_output=True,
                     text=True,
                     timeout=1

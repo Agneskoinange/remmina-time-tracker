@@ -27,7 +27,7 @@ try:
 
         def entry_func(self):
             """Called when the menu entry is clicked - show status."""
-            csv_path = os.path.expanduser("~/.local/share/remmina/time_tracking.csv")
+            csv_path = os.path.expanduser("~/Documents/remmina_time_tracking.csv")
             if os.path.exists(csv_path):
                 remmina.debug(f"Time Tracker CSV: {csv_path}")
             else:

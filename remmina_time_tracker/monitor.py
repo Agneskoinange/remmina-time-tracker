@@ -34,7 +34,7 @@ ALL_MONITORED = RDP_PROCESS_NAMES | SSH_PROCESS_NAMES
 @dataclass
 class ActiveSession:
     """Tracks an active RDP/SSH session."""
-    pid: int
+    pid: str
     server: str
     folder: str
     protocol: str

@@ -54,6 +54,6 @@ done
 echo ""
 echo "Uninstallation complete."
 echo ""
-echo "NOTE: CSV log file preserved at ~/.local/share/remmina/time_tracking.csv"
+echo "NOTE: CSV log file preserved at ~/Documents/remmina_time_tracking.csv"
 echo "      Delete manually if no longer needed."
 echo ""
