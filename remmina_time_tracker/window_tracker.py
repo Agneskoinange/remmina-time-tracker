@@ -3,6 +3,8 @@
 import subprocess
 import logging
 
+import psutil
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,59 +39,81 @@ class WindowTracker:
             logger.warning("Cannot detect window focus on unknown display server")
             return True  # Assume focused to avoid false positives
 
-    def _is_focused_x11(self):
-        """Check focus on X11 using WM_CLASS (not window title).
-
-        Window titles can contain project folder names (e.g. VS Code shows
-        "Remmina-Plugin" in its title), causing false positives. WM_CLASS
-        is set by the application itself and is reliable.
-        """
-        # Method 1: xdotool to get window ID, then xprop for WM_CLASS
+    def _get_active_window_id(self):
+        """Get the active window ID using xdotool or xprop."""
+        # Try xdotool first
         try:
             result = subprocess.run(
                 ["/usr/bin/xdotool", "getactivewindow"],
-                capture_output=True,
-                text=True,
-                timeout=1
+                capture_output=True, text=True, timeout=1
             )
             if result.returncode == 0:
-                window_id = result.stdout.strip()
-                class_result = subprocess.run(
-                    ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
-                    capture_output=True,
-                    text=True,
-                    timeout=1
-                )
-                if class_result.returncode == 0:
-                    wm_class = class_result.stdout.lower()
-                    return "remmina" in wm_class
+                return result.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        # Method 2: xprop only (fallback if xdotool is missing)
+        # Fallback to xprop
         try:
             result = subprocess.run(
                 ["/usr/bin/xprop", "-root", "_NET_ACTIVE_WINDOW"],
-                capture_output=True,
-                text=True,
-                timeout=1
+                capture_output=True, text=True, timeout=1
             )
             if result.returncode == 0 and "0x" in result.stdout:
-                window_id = result.stdout.split()[-1]
-                class_result = subprocess.run(
-                    ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
-                    capture_output=True,
-                    text=True,
-                    timeout=1
-                )
-                if class_result.returncode == 0:
-                    wm_class = class_result.stdout.lower()
-                    return "remmina" in wm_class
+                return result.stdout.split()[-1]
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-        logger.warning("Could not detect focused window on X11 (xdotool/xprop not available)")
-        return True  # Assume focused to avoid false positives
+        return None
+
+    def _is_focused_x11(self):
+        """Check focus on X11 using WM_CLASS and window PID.
+
+        Uses multiple detection methods for reliability across distros:
+        1. WM_CLASS check (works on most systems)
+        2. Window PID check (fallback - checks if active window belongs to Remmina)
+        """
+        window_id = self._get_active_window_id()
+        if not window_id:
+            logger.warning("Could not get active window ID (xdotool/xprop not available)")
+            return True  # Can't detect, assume focused
+
+        # Method 1: Check WM_CLASS
+        try:
+            class_result = subprocess.run(
+                ["/usr/bin/xprop", "-id", window_id, "WM_CLASS"],
+                capture_output=True, text=True, timeout=1
+            )
+            if class_result.returncode == 0:
+                wm_class = class_result.stdout.lower()
+                is_remmina = "remmina" in wm_class
+                logger.debug("Active window WM_CLASS: %s (remmina=%s)",
+                             class_result.stdout.strip(), is_remmina)
+                if is_remmina:
+                    return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # Method 2: Check if active window's PID is a Remmina process
+        try:
+            pid_result = subprocess.run(
+                ["/usr/bin/xdotool", "getactivewindow", "getwindowpid"],
+                capture_output=True, text=True, timeout=1
+            )
+            if pid_result.returncode == 0:
+                window_pid = int(pid_result.stdout.strip())
+                if window_pid > 0:
+                    proc = psutil.Process(window_pid)
+                    proc_name = proc.name().lower()
+                    is_remmina = "remmina" in proc_name
+                    logger.debug("Active window PID %d, process: %s (remmina=%s)",
+                                 window_pid, proc_name, is_remmina)
+                    if is_remmina:
+                        return True
+        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError,
+                psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        return False
 
     def _is_focused_wayland(self):
         """Check focus on Wayland (limited support).
