@@ -52,6 +52,7 @@ class TimeTrackerDaemon:
 
         # Track when Remmina lost focus (for session-specific idle tracking)
         self._remmina_unfocused_since: Optional[datetime] = None
+        self._unfocused_consecutive: int = 0
 
         # GLib main loop
         self._loop = None
@@ -159,6 +160,9 @@ class TimeTrackerDaemon:
 
         Checks both system idle time AND Remmina window focus.
         If Remmina is not focused, count that as "session idle" time.
+
+        Safety: Requires multiple consecutive unfocused checks before
+        starting the unfocused timer, to avoid transient false positives.
         """
         if self._is_sleeping:
             return True
@@ -166,6 +170,7 @@ class TimeTrackerDaemon:
             return True
         if not self._active_sessions:
             self._remmina_unfocused_since = None  # Reset if no sessions
+            self._unfocused_consecutive = 0
             return True
 
         try:
@@ -176,14 +181,29 @@ class TimeTrackerDaemon:
             if self.window_tracker:
                 remmina_focused = self.window_tracker.is_remmina_focused()
 
+            # Require multiple consecutive unfocused checks before acting.
+            # This prevents a single transient detection failure from
+            # starting the idle timer.
+            if not remmina_focused:
+                self._unfocused_consecutive = getattr(self, '_unfocused_consecutive', 0) + 1
+                if self._unfocused_consecutive < 3:
+                    logger.debug(
+                        "Remmina unfocused check %d/3 (waiting for confirmation)",
+                        self._unfocused_consecutive
+                    )
+                    # Don't start the unfocused timer yet
+                    remmina_focused = True
+            else:
+                self._unfocused_consecutive = 0
+
             # Track when Remmina loses/regains focus
             if not remmina_focused:
                 if self._remmina_unfocused_since is None:
                     self._remmina_unfocused_since = now
-                    logger.debug("Remmina lost focus, starting unfocused timer")
+                    logger.info("Remmina lost focus (confirmed), starting unfocused timer")
             else:
                 if self._remmina_unfocused_since is not None:
-                    logger.debug("Remmina regained focus, resetting unfocused timer")
+                    logger.info("Remmina regained focus, resetting unfocused timer")
                 self._remmina_unfocused_since = None
 
             # Determine effective idle time
